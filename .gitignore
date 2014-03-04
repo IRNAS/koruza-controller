@@ -1,0 +1,4 @@
+*.o
+koruza-control
+*.swp
+*.sublime-*
