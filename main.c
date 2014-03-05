@@ -72,18 +72,101 @@ int flush_term(int term_fd, struct termios *p)
     checktty(&newterm, term_fd) != 0;
 }
 
+/**
+ * Sends a command to the device and parses the response. The output
+ * response buffer will be allocated by this method and must be freed
+ * by the caller. In case of an error, the output buffer will be NULL.
+ *
+ * @param serial Serial device stream
+ * @param command Command string to send
+ * @param response Output buffer where the response will be stored
+ * @return True on success, false when some error has ocurred
+ */
+bool send_device_command(FILE *serial, const char *command, char **response)
+{
+  // Initialize response buffer
+  *response = NULL;
+
+  // Request status data from the device
+  if (fprintf(serial, "%s", command) < 0) {
+    fprintf(stderr, "ERROR: Failed to send command to device!\n");
+    return false;
+  }
+
+  // Parse response from device
+  size_t response_size = 0;
+  if (fscanf(serial, "#START\n") < 0) {
+    fprintf(stderr, "ERROR: Failed to parse response from device!\n");
+    return false;
+  }
+
+  for (;;) {
+    char buffer[4096];
+    memset(buffer, 0, sizeof(buffer));
+    if (fscanf(serial, "%4095[^\n]\n", buffer) <= 0) {
+      fprintf(stderr, "ERROR: Failed to parse response from device!\n");
+      free(*response);
+      *response = NULL;
+      return false;
+    }
+
+    if (strncmp(buffer, "#STOP", sizeof(buffer)) == 0) {
+      break;
+    }
+
+    size_t length = strnlen(buffer, sizeof(buffer));
+    size_t offset = response_size;
+    response_size += length + 1;
+    *response = realloc(*response, response_size);
+    strncpy(*response + offset, buffer, length);
+    (*response)[offset + length] = '\n';
+  }
+
+  return true;
+}
+
+/**
+ * Requests device state and prints the response to stdout.
+ *
+ * @param serial Serial device stream
+ * @return True on success, false when some error has ocurred
+ */
+bool request_device_state(FILE *serial)
+{
+  char *response;
+  if (!send_device_command(serial, "A 5\n", &response))
+    return false;
+
+  fprintf(stderr, "%s", response);
+  return true;
+}
+
+/**
+ * Starts the device controller that accepts keyboard input on
+ * stdin and transmits commands based on the configuration file.
+ *
+ * @param commands Commands configuration option
+ * @param serial Serial device stream
+ * @return True on success, false when some error has ocurred
+ */
 bool start_controller(ucl_object_t *commands, FILE *serial)
 {
   struct timespec tsp = {0, 500};
   struct termios attr;
   struct termios *p = &attr;
   int term_fd = fileno(stdin);
+  bool ret_flag = true;
 
   fflush(stdout);
   if (!flush_term(term_fd, p))
    return false;
 
   for (;;) {
+    if (!request_device_state(serial)) {
+      ret_flag = false;
+      break;
+    }
+
     nanosleep(&tsp, NULL);
     unsigned char ch = keypress(term_fd);
     if (ch == 0)
@@ -128,19 +211,23 @@ bool start_controller(ucl_object_t *commands, FILE *serial)
       else
         fprintf(stderr, "INFO: Sending command: %s", action);
 
-      if (fprintf(serial, "%s", action) < 0) {
-        fprintf(stderr, "ERROR: Failed to send command to device!\n");
+      char *response;
+      if (!send_device_command(serial, action, &response))
         continue;
-      }
+
+      // TODO: Output response for some commands
     }
   }
 
   if (tcsetattr(term_fd, TCSADRAIN, p) == -1 && tcsetattr(term_fd, TCSADRAIN, p) == -1 )
     return false;
 
-  return true;
+  return ret_flag;
 }
 
+/**
+ * Entry point.
+ */
 int main(int argc, char **argv)
 {
   // Parse program options
