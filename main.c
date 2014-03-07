@@ -27,6 +27,9 @@
 #include <termios.h>
 #include <ucl.h>
 
+// Uncomment this to enable verbose debug output
+//#define DEBUG
+
 void show_help(const char *app)
 {
   fprintf(stderr, "usage: %s [options]\n", app);
@@ -72,54 +75,128 @@ int flush_term(int term_fd, struct termios *p)
     checktty(&newterm, term_fd) != 0;
 }
 
+time_t timer_now()
+{
+  struct timespec ts;
+  if (clock_gettime(CLOCK_MONOTONIC, &ts) < 0) {
+    fprintf(stderr, "ERROR: Failed to get monotonic clock, weird things may happen!");
+    return -1;
+  }
+  return ts.tv_sec;
+}
+
+int is_timeout(time_t *timer, time_t period)
+{
+  if (*timer < 0)
+    return 0;
+
+  time_t now = timer_now();
+  if (now - *timer > period) {
+    *timer = now;
+    return 1;
+  }
+
+  return 0;
+}
+
 /**
  * Sends a command to the device and parses the response. The output
  * response buffer will be allocated by this method and must be freed
  * by the caller. In case of an error, the output buffer will be NULL.
  *
- * @param serial Serial device stream
+ * @param serial_fd Serial port file descriptor
  * @param command Command string to send
  * @param response Output buffer where the response will be stored
  * @return True on success, false when some error has ocurred
  */
-bool send_device_command(FILE *serial, const char *command, char **response)
+bool send_device_command(int serial_fd, const char *command, char **response)
 {
   // Initialize response buffer
   *response = NULL;
 
+#ifdef DEBUG
+  fprintf(stderr, "DEBUG: Sending command: %s", command);
+#endif
+
   // Request status data from the device
-  if (fprintf(serial, "%s", command) < 0) {
+  if (write(serial_fd, command, strlen(command)) < 0) {
     fprintf(stderr, "ERROR: Failed to send command to device!\n");
+    fprintf(stderr, "ERROR: %s (%d)!\n", strerror(errno), errno);
     return false;
   }
+
+#ifdef DEBUG
+  fprintf(stderr, "DEBUG: Waiting for response header from device.\n");
+#endif
 
   // Parse response from device
-  size_t response_size = 0;
-  if (fscanf(serial, "#START\n") < 0) {
-    fprintf(stderr, "ERROR: Failed to parse response from device!\n");
+  char buffer[4096];
+  memset(buffer, 0, sizeof(buffer));
+  if (read(serial_fd, buffer, 8) < 0) {
+    fprintf(stderr, "ERROR: Failed to read response header from device!\n");
+    return false;
+  } else if (strcmp(buffer, "#START\r\n") != 0) {
+    fprintf(stderr, "ERROR: Failed to parse response header from device!\n");
+    fprintf(stderr, "ERROR: Expected '#START', received: %s", buffer);
     return false;
   }
 
-  for (;;) {
-    char buffer[4096];
-    memset(buffer, 0, sizeof(buffer));
-    if (fscanf(serial, "%4095[^\n]\n", buffer) <= 0) {
-      fprintf(stderr, "ERROR: Failed to parse response from device!\n");
+#define MAX_RESPONSE_LINES 128
+  int line;
+  char *buffer_p = (char*) buffer;
+  size_t buffer_size = 0;
+  size_t response_size = 0;
+  memset(buffer, 0, sizeof(buffer));
+  for (line = 0; line < MAX_RESPONSE_LINES;) {
+    if (buffer_size >= sizeof(buffer)) {
+      fprintf(stderr, "ERROR: Response line longer than %ld bytes!\n", sizeof(buffer));
+
       free(*response);
       *response = NULL;
       return false;
     }
 
-    if (strncmp(buffer, "#STOP", sizeof(buffer)) == 0) {
+    if (read(serial_fd, buffer_p + buffer_size, 1) < 0) {
+      fprintf(stderr, "ERROR: Failed to read from device!\n");
+      fprintf(stderr, "ERROR: %s (%d)!\n", strerror(errno), errno);
+
+      free(*response);
+      *response = NULL;
+      return false;
+    } else {
+      buffer_size++;
+    }
+
+    char last = buffer[buffer_size - 1];
+    if (last == '\r') {
+      buffer[buffer_size - 1] = 0;
+      buffer_size--;
+      continue;
+    } else if (last != '\n') {
+      continue;
+    }
+
+    line++;
+
+#ifdef DEBUG
+    fprintf(stderr, "DEBUG: Got response line: %s", buffer);
+#endif
+
+    if (strncmp(buffer, "#STOP\n", sizeof(buffer)) == 0) {
+#ifdef DEBUG
+      fprintf(stderr, "DEBUG: Detected stop message.\n");
+#endif
       break;
     }
 
-    size_t length = strnlen(buffer, sizeof(buffer));
     size_t offset = response_size;
-    response_size += length + 1;
-    *response = realloc(*response, response_size);
-    strncpy(*response + offset, buffer, length);
-    (*response)[offset + length] = '\n';
+    response_size += buffer_size;
+    *response = realloc(*response, response_size + 1);
+    memcpy(*response + offset, buffer, buffer_size);
+    (*response)[response_size] = 0;
+
+    memset(buffer, 0, buffer_size);
+    buffer_size = 0;
   }
 
   return true;
@@ -128,16 +205,20 @@ bool send_device_command(FILE *serial, const char *command, char **response)
 /**
  * Requests device state and prints the response to stdout.
  *
- * @param serial Serial device stream
+ * @param serial_fd Serial port file descriptor
  * @return True on success, false when some error has ocurred
  */
-bool request_device_state(FILE *serial)
+bool request_device_state(int serial_fd)
 {
   char *response;
-  if (!send_device_command(serial, "A 5\n", &response))
+  if (!send_device_command(serial_fd, "A 4\n", &response))
     return false;
 
-  fprintf(stderr, "%s", response);
+  if (response) {
+    fprintf(stderr, "--- Current KORUZA State ---\n");
+    fprintf(stderr, "%s", response);
+    fprintf(stderr, "----------------------------\n");
+  }
   return true;
 }
 
@@ -146,25 +227,29 @@ bool request_device_state(FILE *serial)
  * stdin and transmits commands based on the configuration file.
  *
  * @param commands Commands configuration option
- * @param serial Serial device stream
+ * @param serial_fd Serial port file descriptor
  * @return True on success, false when some error has ocurred
  */
-bool start_controller(ucl_object_t *commands, FILE *serial)
+bool start_controller(ucl_object_t *commands, int serial_fd)
 {
   struct timespec tsp = {0, 500};
   struct termios attr;
   struct termios *p = &attr;
   int term_fd = fileno(stdin);
   bool ret_flag = true;
+  time_t timer_refresh_controller = timer_now();
 
   fflush(stdout);
   if (!flush_term(term_fd, p))
-   return false;
+    return false;
 
   for (;;) {
-    if (!request_device_state(serial)) {
-      ret_flag = false;
-      break;
+    // Periodically request device state
+    if (is_timeout(&timer_refresh_controller, 1)) {
+      if (!request_device_state(serial_fd)) {
+        ret_flag = false;
+        break;
+      }
     }
 
     nanosleep(&tsp, NULL);
@@ -212,10 +297,12 @@ bool start_controller(ucl_object_t *commands, FILE *serial)
         fprintf(stderr, "INFO: Sending command: %s", action);
 
       char *response;
-      if (!send_device_command(serial, action, &response))
+      if (!send_device_command(serial_fd, action, &response))
         continue;
 
-      // TODO: Output response for some commands
+      if (response) {
+        // TODO: Output response for some commands
+      }
     }
   }
 
@@ -258,8 +345,8 @@ int main(int argc, char **argv)
   struct ucl_parser *parser = ucl_parser_new(UCL_PARSER_KEY_LOWERCASE);
   ucl_object_t *config = NULL;
   ucl_object_t *obj = NULL;
-  FILE *serial = NULL;
   int ret_value = 0;
+  int serial_fd = -1;
   if (!parser) {
     fprintf(stderr, "ERROR: Failed to initialize configuration parser!\n");
     return 2;
@@ -299,17 +386,9 @@ int main(int argc, char **argv)
   }
 
   // Open the serial device
-  serial = fopen(device, "r+");
-  if (!serial) {
+  serial_fd = open(device, O_RDWR);
+  if (serial_fd == -1) {
     fprintf(stderr, "ERROR: Failed to open the serial device '%s'!\n", device);
-    ret_value = 2;
-    goto cleanup_exit;
-  }
-
-  // Setup the serial device for non-blocking mode
-  int serial_fd = fileno(serial);
-  if (fcntl(serial_fd, F_SETFL, O_NONBLOCK) < 0) {
-    fprintf(stderr, "ERROR: Failed to setup the serial device!\n");
     ret_value = 2;
     goto cleanup_exit;
   }
@@ -342,7 +421,7 @@ int main(int argc, char **argv)
     ret_value = 2;
     goto cleanup_exit;
   }
-  start_controller(obj, serial);
+  start_controller(obj, serial_fd);
 
   fprintf(stderr, "INFO: Closing controller.\n");
 
@@ -352,7 +431,7 @@ cleanup_exit:
     ucl_object_free(config);
   if (parser)
     ucl_parser_free(parser);
-  if (serial)
-    fclose(serial);
+  if (serial_fd != -1)
+    close(serial_fd);
   return ret_value;
 }
