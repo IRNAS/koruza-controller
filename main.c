@@ -36,6 +36,7 @@ void show_help(const char *app)
   fprintf(stderr,
     "       -h         this text\n"
     "       -c config  configuration file\n"
+    "       -s         request status and exit\n"
   );
 }
 
@@ -206,18 +207,23 @@ bool send_device_command(int serial_fd, const char *command, char **response)
  * Requests device state and prints the response to stdout.
  *
  * @param serial_fd Serial port file descriptor
+ * @param format Should the output contain beginning/end formatting
  * @return True on success, false when some error has ocurred
  */
-bool request_device_state(int serial_fd)
+bool request_device_state(int serial_fd, bool format)
 {
   char *response;
   if (!send_device_command(serial_fd, "A 4\n", &response))
     return false;
 
   if (response) {
-    fprintf(stderr, "--- Current KORUZA State ---\n");
-    fprintf(stderr, "%s", response);
-    fprintf(stderr, "----------------------------\n");
+    if (format)
+      fprintf(stdout, "--- Current KORUZA State ---\n");
+
+    fprintf(stdout, "%s", response);
+
+    if (format)
+      fprintf(stdout, "----------------------------\n");
   }
   return true;
 }
@@ -246,7 +252,7 @@ bool start_controller(ucl_object_t *commands, int serial_fd)
   for (;;) {
     // Periodically request device state
     if (is_timeout(&timer_refresh_controller, 1)) {
-      if (!request_device_state(serial_fd)) {
+      if (!request_device_state(serial_fd, true)) {
         ret_flag = false;
         break;
       }
@@ -319,15 +325,17 @@ int main(int argc, char **argv)
 {
   // Parse program options
   char *config_file = NULL;
+  bool status_only = false;
 
   char c;
-  while ((c = getopt(argc, argv, "hc:")) != EOF) {
+  while ((c = getopt(argc, argv, "hc:s")) != EOF) {
     switch (c) {
       case 'h': {
         show_help(argv[0]);
         return 1;
       }
       case 'c': config_file = strdup(optarg); break;
+      case 's': status_only = true; break;
       default: {
         fprintf(stderr, "ERROR: Invalid option %c!\n", c);
         show_help(argv[0]);
@@ -421,9 +429,14 @@ int main(int argc, char **argv)
     ret_value = 2;
     goto cleanup_exit;
   }
-  start_controller(obj, serial_fd);
 
-  fprintf(stderr, "INFO: Closing controller.\n");
+  if (status_only) {
+    request_device_state(serial_fd, false);
+  } else {
+    start_controller(obj, serial_fd);
+
+    fprintf(stderr, "INFO: Closing controller.\n");
+  }
 
 cleanup_exit:
   // Cleanup and exit
