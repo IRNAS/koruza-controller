@@ -420,19 +420,19 @@ int main(int argc, char **argv)
     goto cleanup_exit;
   }
 
-  fprintf(stderr, "INFO: Controller ready and accepting commands.\n");
-  fprintf(stderr, "INFO: Press 'esc' to quit.\n");
-
-  obj = ucl_object_find_key(config, "commands");
-  if (!obj) {
-    fprintf(stderr, "ERROR: Missing 'commands' in configuration file!\n");
-    ret_value = 2;
-    goto cleanup_exit;
-  }
-
   if (status_only) {
     request_device_state(serial_fd, false);
   } else {
+    fprintf(stderr, "INFO: Controller ready and accepting commands.\n");
+    fprintf(stderr, "INFO: Press 'esc' to quit.\n");
+
+    obj = ucl_object_find_key(config, "commands");
+    if (!obj) {
+      fprintf(stderr, "ERROR: Missing 'commands' in configuration file!\n");
+      ret_value = 2;
+      goto cleanup_exit;
+    }
+
     start_controller(obj, serial_fd);
 
     fprintf(stderr, "INFO: Closing controller.\n");
