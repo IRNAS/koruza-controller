@@ -236,7 +236,7 @@ bool request_device_state(int serial_fd, bool format)
  * @param serial_fd Serial port file descriptor
  * @return True on success, false when some error has ocurred
  */
-bool start_controller(ucl_object_t *commands, int serial_fd)
+bool start_controller(ucl_object_t *config, int serial_fd)
 {
   struct timespec tsp = {0, 500};
   struct termios attr;
@@ -244,6 +244,22 @@ bool start_controller(ucl_object_t *commands, int serial_fd)
   int term_fd = fileno(stdin);
   bool ret_flag = true;
   time_t timer_refresh_controller = timer_now();
+  int status_refresh_interval;
+
+  ucl_object_t *commands = ucl_object_find_key(config, "commands");
+  if (!commands) {
+    fprintf(stderr, "ERROR: Missing 'commands' in configuration file!\n");
+    return false;
+  }
+
+  ucl_object_t *interval = ucl_object_find_key(config, "status_interval");
+  if (!interval) {
+    fprintf(stderr, "ERROR: Missing 'status_interval' in configuration file!\n");
+    return false;
+  } else if (!ucl_object_toint_safe(interval, &status_refresh_interval)) {
+    fprintf(stderr, "ERROR: Status refresh interval must be an integer!\n");
+    return false;
+  }
 
   fflush(stdout);
   if (!flush_term(term_fd, p))
@@ -251,7 +267,7 @@ bool start_controller(ucl_object_t *commands, int serial_fd)
 
   for (;;) {
     // Periodically request device state
-    if (is_timeout(&timer_refresh_controller, 1)) {
+    if (is_timeout(&timer_refresh_controller, status_refresh_interval)) {
       if (!request_device_state(serial_fd, true)) {
         ret_flag = false;
         break;
@@ -426,14 +442,7 @@ int main(int argc, char **argv)
     fprintf(stderr, "INFO: Controller ready and accepting commands.\n");
     fprintf(stderr, "INFO: Press 'esc' to quit.\n");
 
-    obj = ucl_object_find_key(config, "commands");
-    if (!obj) {
-      fprintf(stderr, "ERROR: Missing 'commands' in configuration file!\n");
-      ret_value = 2;
-      goto cleanup_exit;
-    }
-
-    start_controller(obj, serial_fd);
+    start_controller(config, serial_fd);
 
     fprintf(stderr, "INFO: Closing controller.\n");
   }
