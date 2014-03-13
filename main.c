@@ -76,22 +76,22 @@ int flush_term(int term_fd, struct termios *p)
     checktty(&newterm, term_fd) != 0;
 }
 
-time_t timer_now()
+long timer_now()
 {
   struct timespec ts;
   if (clock_gettime(CLOCK_MONOTONIC, &ts) < 0) {
     fprintf(stderr, "ERROR: Failed to get monotonic clock, weird things may happen!");
     return -1;
   }
-  return ts.tv_sec;
+  return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
-int is_timeout(time_t *timer, time_t period)
+int is_timeout(long *timer, long period)
 {
   if (*timer < 0)
     return 0;
 
-  time_t now = timer_now();
+  long now = timer_now();
   if (now - *timer > period) {
     *timer = now;
     return 1;
@@ -243,8 +243,9 @@ bool start_controller(ucl_object_t *config, int serial_fd)
   struct termios *p = &attr;
   int term_fd = fileno(stdin);
   bool ret_flag = true;
-  time_t timer_refresh_controller = timer_now();
-  int status_refresh_interval;
+  long timer_refresh_controller = timer_now();
+  double status_refresh_interval_sec;
+  long status_refresh_interval_msec;
 
   ucl_object_t *commands = ucl_object_find_key(config, "commands");
   if (!commands) {
@@ -256,10 +257,12 @@ bool start_controller(ucl_object_t *config, int serial_fd)
   if (!interval) {
     fprintf(stderr, "ERROR: Missing 'status_interval' in configuration file!\n");
     return false;
-  } else if (!ucl_object_toint_safe(interval, &status_refresh_interval)) {
-    fprintf(stderr, "ERROR: Status refresh interval must be an integer!\n");
+  } else if (!ucl_object_todouble_safe(interval, &status_refresh_interval_sec)) {
+    fprintf(stderr, "ERROR: Status refresh interval must be an integer or double!\n");
     return false;
   }
+
+  status_refresh_interval_msec = (long) (status_refresh_interval_sec * 1000);
 
   fflush(stdout);
   if (!flush_term(term_fd, p))
@@ -267,7 +270,7 @@ bool start_controller(ucl_object_t *config, int serial_fd)
 
   for (;;) {
     // Periodically request device state
-    if (is_timeout(&timer_refresh_controller, status_refresh_interval)) {
+    if (is_timeout(&timer_refresh_controller, status_refresh_interval_msec)) {
       if (!request_device_state(serial_fd, true)) {
         ret_flag = false;
         break;
