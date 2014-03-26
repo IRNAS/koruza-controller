@@ -3,7 +3,7 @@
 all: koruza-control
 
 koruza-control: main.o libucl
-	$(CC) $(LDFLAGS) -o $@ main.o libucl/.obj/*.o -lrt
+	$(CC) $(LDFLAGS) -o $@ main.o libucl/.obj/*.o -lrt -levent
 
 libucl:
 	$(MAKE) -C libucl -f Makefile.unix
