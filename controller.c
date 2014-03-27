@@ -35,7 +35,6 @@ int checktty(struct termios *p, int term_fd)
     (p->c_cc[VTIME] == ck.c_cc[VMIN]);
 }
 
-
 unsigned char keypress(int term_fd)
 {
   unsigned char ch;
