@@ -2,8 +2,8 @@
 
 all: koruza-control
 
-koruza-control: main.o libucl
-	$(CC) $(LDFLAGS) -o $@ main.o libucl/.obj/*.o -lrt -levent
+koruza-control: main.o server.o controller.o util.o libucl
+	$(CC) $(LDFLAGS) -o $@ main.o server.o controller.o util.o libucl/.obj/*.o -lrt -levent
 
 libucl:
 	$(MAKE) -C libucl -f Makefile.unix
