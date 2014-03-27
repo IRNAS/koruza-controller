@@ -61,126 +61,6 @@ int flush_term(int term_fd, struct termios *p)
 }
 
 /**
- * Sends a command to the server and parses the response. The output
- * response buffer will be allocated by this method and must be freed
- * by the caller. In case of an error, the output buffer will be NULL.
- *
- * @param client_fd Connection to server file descriptor
- * @param command Command string to send
- * @param response Output buffer where the response will be stored
- * @return True on success, false when some error has ocurred
- */
-bool controller_send_device_command(int client_fd, const char *command, char **response)
-{
-  // Initialize response buffer
-  *response = NULL;
-
-  DEBUG_LOG("DEBUG: Sending command: %s", command);
-
-  // Request status data from the device
-  if (write(client_fd, command, strlen(command)) < 0) {
-    fprintf(stderr, "ERROR: Failed to send command to server!\n");
-    fprintf(stderr, "ERROR: %s (%d)!\n", strerror(errno), errno);
-    return false;
-  }
-
-  DEBUG_LOG("DEBUG: Waiting for response header from server.\n");
-
-  // Parse response from device
-  char buffer[4096];
-  memset(buffer, 0, sizeof(buffer));
-  if (read(client_fd, buffer, 8) < 0) {
-    fprintf(stderr, "ERROR: Failed to read response header from server!\n");
-    return false;
-  } else if (strcmp(buffer, "#START\r\n") != 0) {
-    fprintf(stderr, "ERROR: Failed to parse response header from server!\n");
-    fprintf(stderr, "ERROR: Expected '#START', received: %s", buffer);
-    return false;
-  }
-
-#define MAX_RESPONSE_LINES 128
-  int line;
-  char *buffer_p = (char*) buffer;
-  size_t buffer_size = 0;
-  size_t response_size = 0;
-  memset(buffer, 0, sizeof(buffer));
-  for (line = 0; line < MAX_RESPONSE_LINES;) {
-    if (buffer_size >= sizeof(buffer)) {
-      fprintf(stderr, "ERROR: Response line longer than %ld bytes!\n", sizeof(buffer));
-
-      free(*response);
-      *response = NULL;
-      return false;
-    }
-
-    if (read(client_fd, buffer_p + buffer_size, 1) < 0) {
-      fprintf(stderr, "ERROR: Failed to read from server!\n");
-      fprintf(stderr, "ERROR: %s (%d)!\n", strerror(errno), errno);
-
-      free(*response);
-      *response = NULL;
-      return false;
-    } else {
-      buffer_size++;
-    }
-
-    char last = buffer[buffer_size - 1];
-    if (last == '\r') {
-      buffer[buffer_size - 1] = 0;
-      buffer_size--;
-      continue;
-    } else if (last != '\n') {
-      continue;
-    }
-
-    line++;
-
-    DEBUG_LOG("DEBUG: Got response line: %s", buffer);
-
-    if (strncmp(buffer, "#STOP\n", sizeof(buffer)) == 0) {
-      DEBUG_LOG("DEBUG: Detected stop message.\n");
-      break;
-    }
-
-    size_t offset = response_size;
-    response_size += buffer_size;
-    *response = realloc(*response, response_size + 1);
-    memcpy(*response + offset, buffer, buffer_size);
-    (*response)[response_size] = 0;
-
-    memset(buffer, 0, buffer_size);
-    buffer_size = 0;
-  }
-
-  return true;
-}
-
-/**
- * Requests device state and prints the response to stdout.
- *
- * @param client_fd Connection to server file descriptor
- * @param format Should the output contain beginning/end formatting
- * @return True on success, false when some error has ocurred
- */
-bool controller_request_device_state(int client_fd, bool format)
-{
-  char *response;
-  if (!controller_send_device_command(client_fd, "A 4\n", &response))
-    return false;
-
-  if (response) {
-    if (format)
-      fprintf(stdout, "--- Current KORUZA State ---\n");
-
-    fprintf(stdout, "%s", response);
-
-    if (format)
-      fprintf(stdout, "----------------------------\n");
-  }
-  return true;
-}
-
-/**
  * Starts the device controller that accepts keyboard input on
  * stdin and transmits commands based on the configuration file.
  *
@@ -223,7 +103,7 @@ bool start_manual_controller(ucl_object_t *config, int client_fd)
   for (;;) {
     // Periodically request device state
     if (is_timeout(&timer_refresh_controller, status_refresh_interval_msec)) {
-      if (!controller_request_device_state(client_fd, true)) {
+      if (!client_request_device_state(client_fd, true)) {
         ret_flag = false;
         break;
       }
@@ -274,7 +154,7 @@ bool start_manual_controller(ucl_object_t *config, int client_fd)
         fprintf(stderr, "INFO: Sending command: %s", action);
 
       char *response;
-      if (!controller_send_device_command(client_fd, action, &response))
+      if (!client_send_device_command(client_fd, action, &response))
         continue;
 
       if (response) {
@@ -310,36 +190,12 @@ bool start_controller(ucl_object_t *config, bool status_only)
     return false;
   }
 
-  // Setup the UNIX socket
-  struct sockaddr_un address;
-  memset(&address, 0, sizeof(address));
-  address.sun_family = AF_UNIX;
-
-  ucl_object_t *obj = ucl_object_find_key(cfg_server, "socket");
-  const char *socket_path;
-  if (!obj) {
-    fprintf(stderr, "ERROR: Missing 'socket' in configuration file!\n");
+  int client_fd = client_connect(cfg_server);
+  if (client_fd < 0)
     return false;
-  } else if (!ucl_object_tostring_safe(obj, &socket_path)) {
-    fprintf(stderr, "ERROR: Socket path must be a string!\n");
-    return false;
-  }
-
-  strncpy(address.sun_path, socket_path, sizeof(address.sun_path) - 1);
-
-  int client_fd;
-  if ((client_fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
-    fprintf(stderr, "ERROR: Unable to create UNIX socket!\n");
-    return false;
-  }
-
-  if (connect(client_fd, (struct sockaddr*) &address, sizeof(address)) == -1) {
-    fprintf(stderr, "ERROR: Unable to connect with server!\n");
-    return false;
-  }
 
   if (status_only) {
-    controller_request_device_state(client_fd, false);
+    client_request_device_state(client_fd, false);
   } else {
     fprintf(stderr, "INFO: Controller ready and accepting commands.\n");
     fprintf(stderr, "INFO: Press 'esc' to quit.\n");
