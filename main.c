@@ -27,6 +27,7 @@
 #include "global.h"
 #include "server.h"
 #include "controller.h"
+#include "collector.h"
 
 /**
  * Prints help text.
@@ -39,6 +40,7 @@ void show_help(const char *app)
     "       -c config  configuration file\n"
     "       -s         request status and exit\n"
     "       -d         start server daemon\n"
+    "       -l         start the data collector\n"
     "       -f         run in foreground\n"
   );
 }
@@ -51,11 +53,12 @@ int main(int argc, char **argv)
   // Parse program options
   char *config_file = NULL;
   bool server = false;
+  bool collector = false;
   bool status_only = false;
   int log_option = 0;
 
   char c;
-  while ((c = getopt(argc, argv, "hc:sdf")) != EOF) {
+  while ((c = getopt(argc, argv, "hc:sdfl")) != EOF) {
     switch (c) {
       case 'h': {
         show_help(argv[0]);
@@ -64,6 +67,7 @@ int main(int argc, char **argv)
       case 'c': config_file = strdup(optarg); break;
       case 's': status_only = true; break;
       case 'd': server = true; break;
+      case 'l': collector = true; break;
       case 'f': log_option |= LOG_PERROR; break;
       default: {
         fprintf(stderr, "ERROR: Invalid option %c!\n", c);
@@ -105,6 +109,8 @@ int main(int argc, char **argv)
     }
 
     start_server(obj, log_option);
+  } else if (collector) {
+    start_collector(config);
   } else {
     start_controller(config, status_only);
   }

@@ -181,5 +181,7 @@ bool client_request_device_state(int client_fd, bool format)
     if (format)
       fprintf(stdout, "----------------------------\n");
   }
+
+  free(response);
   return true;
 }

@@ -18,12 +18,11 @@
  */
 #include "global.h"
 #include "controller.h"
+#include "client.h"
 #include "util.h"
 
 #include <termios.h>
 #include <errno.h>
-#include <sys/socket.h>
-#include <sys/un.h>
 
 int checktty(struct termios *p, int term_fd)
 {
@@ -159,6 +158,7 @@ bool start_manual_controller(ucl_object_t *config, int client_fd)
 
       if (response) {
         // TODO: Output response for some commands
+        free(response);
       }
     }
   }
