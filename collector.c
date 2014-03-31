@@ -153,9 +153,9 @@ bool start_collector(ucl_object_t *config)
     fprintf(stderr, "ERROR: Unable to open log file.\n");
     return false;
   }
-  FILE *state_file = fopen(state_filename, "a");
+  FILE *state_file = fopen(state_filename, "w");
   if (!state_file) {
-    fprintf(stderr, "ERROR: Unable to open state log file.\n");
+    fprintf(stderr, "ERROR: Unable to open state file.\n");
     return false;
   }
 
@@ -167,6 +167,7 @@ bool start_collector(ucl_object_t *config)
     return false;
 
   struct log_item_t *log_table = NULL;
+  size_t state_file_size = 0;
   size_t log_file_size = 0;
   struct timespec tsp = {0, 10000000};
 
@@ -181,11 +182,9 @@ bool start_collector(ucl_object_t *config)
 
       // Check for state file truncation -- in this case reset all state
       struct stat stats;
-      if (fstat(fileno(log_file), &stats) != 0) {
-        fprintf(stderr, "ERROR: Unable to fstat() log file!\n");
-        fprintf(stderr, "ERROR: %s (%d)\n", strerror(errno), errno);
-        return 1;
-      } else if (log_file_size > 0 && stats.st_size < log_file_size) {
+      stats.st_size = 0;
+      if (fstat(fileno(state_file), &stats) != 0 ||
+          (state_file_size > 0 && stats.st_size < state_file_size)) {
         struct log_item_t *item, *tmp;
         HASH_ITER(hh, log_table, item, tmp) {
           HASH_DEL(log_table, item);
@@ -193,6 +192,22 @@ bool start_collector(ucl_object_t *config)
           free(item);
         }
 
+        DEBUG_LOG("Reopening state file.");
+
+        // Reopen state file
+        state_file = fopen(state_filename, "w");
+        if (!state_file) {
+          fprintf(stderr, "ERROR: Unable to reopen state file.\n");
+          return false;
+        }
+      }
+
+      state_file_size = stats.st_size;
+
+      // Check for log file truncation
+      stats.st_size = 0;
+      if (fstat(fileno(log_file), &stats) != 0 ||
+          (log_file_size > 0 && stats.st_size < log_file_size)) {
         DEBUG_LOG("Reopening log file.");
 
         // Reopen log file
