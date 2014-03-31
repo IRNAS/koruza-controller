@@ -49,34 +49,42 @@ void collector_parse_response(struct log_item_t **log_table,
   char *rsp = strdup(response);
   char *rsp_tok = rsp;
 
+  ftruncate(fileno(state), 0);
+  rewind(state);
+
   // Each line in the form of <key>: <double> is a valid response
   for (;; rsp_tok = NULL) {
     char *line = strtok(rsp_tok, "\n");
     if (!line)
       break;
 
-    char key[256];
+    char key[256] = {0,};
+    char value_str[256] = {0,};
     double value;
 
-    if (sscanf(line, "%[^:]%*c%lf", key, &value) != 2)
-      continue;
+    if (sscanf(line, "%[^:]%*c%lf", key, &value) == 2) {
+      // Value line -- store into the log hash table
+      struct log_item_t *item;
+      HASH_FIND_STR(*log_table, key, item);
+      if (!item) {
+        // Create new item and store it
+        item = (struct log_item_t*) malloc(sizeof(struct log_item_t));
+        item->key = strdup(key);
+        item->count = 0;
+        item->sum = 0.0;
 
-    // Store into the log hash table
-    struct log_item_t *item;
-    HASH_FIND_STR(*log_table, key, item);
-    if (!item) {
-      // Create new item and store it
-      item = (struct log_item_t*) malloc(sizeof(struct log_item_t));
-      item->key = strdup(key);
-      item->count = 0;
-      item->sum = 0.0;
+        HASH_ADD_KEYPTR(hh, *log_table, item->key, strlen(item->key), item);
+      }
 
-      HASH_ADD_KEYPTR(hh, *log_table, item->key, strlen(item->key), item);
+      item->last = value;
+      item->count++;
+      item->sum += value;
+
+      fprintf(state, "%s: %f\n", item->key, item->sum / item->count);
+    } else if (sscanf(line, "%[^:]: %250s", key, value_str) == 2) {
+      // Nodewatcher metadata line -- output unchanged line to state file
+      fprintf(state, "%s\n", line);
     }
-
-    item->last = value;
-    item->count++;
-    item->sum += value;
   }
 
   free(rsp);
@@ -84,12 +92,10 @@ void collector_parse_response(struct log_item_t **log_table,
   // Output current state and log last values
   struct log_item_t *item;
 
-  ftruncate(fileno(state), 0);
-  rewind(state);
   for (item = *log_table; item != NULL; item = item->hh.next) {
-    fprintf(state, "%s: %f\n", item->key, item->sum / item->count);
     gzprintf(log, "%d\t%s\t%f\n", time(NULL), item->key, item->last);
   }
+
   fflush(state);
   gzflush(log, Z_SYNC_FLUSH);
 }
