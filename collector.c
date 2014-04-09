@@ -201,6 +201,7 @@ bool start_collector(ucl_object_t *config)
         DEBUG_LOG("Reopening state file.");
 
         // Reopen state file
+        fclose(state_file);
         state_file = fopen(state_filename, "w");
         if (!state_file) {
           fprintf(stderr, "ERROR: Unable to reopen state file.\n");
@@ -218,6 +219,7 @@ bool start_collector(ucl_object_t *config)
 
         // Reopen log file
         gzclose(log_file_gz);
+        fclose(log_file);
         log_file = fopen(log_filename, "w");
         if (!log_file) {
           fprintf(stderr, "ERROR: Unable to reopen log file.\n");
