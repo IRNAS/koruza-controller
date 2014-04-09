@@ -120,9 +120,9 @@ bool start_collector(ucl_object_t *config)
     return false;
   }
 
-  long timer_poll = timer_now();
+  utimer_t timer_poll = timer_now();
   double poll_interval_sec;
-  long poll_interval_msec;
+  utimer_t poll_interval_msec;
 
   ucl_object_t *interval = ucl_object_find_key(cfg_collector, "poll_interval");
   if (!interval) {
@@ -183,6 +183,7 @@ bool start_collector(ucl_object_t *config)
     // Periodically request data
     if (is_timeout(&timer_poll, poll_interval_msec)) {
       char *response;
+      DEBUG_LOG("Requesting data from server.\n");
       if (!client_send_device_command(client_fd, "A 4\n", &response))
         continue;
 

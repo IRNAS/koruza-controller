@@ -74,9 +74,9 @@ bool start_manual_controller(ucl_object_t *config, int client_fd)
   struct termios *p = &attr;
   int term_fd = fileno(stdin);
   bool ret_flag = true;
-  long timer_refresh_controller = timer_now();
+  utimer_t timer_refresh_controller = timer_now();
   double status_refresh_interval_sec;
-  long status_refresh_interval_msec;
+  utimer_t status_refresh_interval_msec;
 
   ucl_object_t *commands = ucl_object_find_key(config, "commands");
   if (!commands) {

@@ -21,7 +21,7 @@
 #include <stdio.h>
 #include <time.h>
 
-long timer_now()
+utimer_t timer_now()
 {
   struct timespec ts;
   if (clock_gettime(CLOCK_MONOTONIC, &ts) < 0) {
@@ -31,12 +31,12 @@ long timer_now()
   return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
-int is_timeout(long *timer, long period)
+int is_timeout(utimer_t *timer, utimer_t period)
 {
   if (*timer < 0)
     return 0;
 
-  long now = timer_now();
+  utimer_t now = timer_now();
   if (now - *timer > period) {
     *timer = now;
     return 1;

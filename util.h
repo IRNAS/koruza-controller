@@ -19,7 +19,9 @@
 #ifndef KORUZA_CONTROLLER_UTIL_H
 #define KORUZA_CONTROLLER_UTIL_H
 
-long timer_now();
-int is_timeout(long *timer, long period);
+typedef unsigned long long utimer_t;
+
+utimer_t timer_now();
+int is_timeout(utimer_t *timer, utimer_t period);
 
 #endif
