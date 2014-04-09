@@ -23,7 +23,7 @@
 //#define DEBUG
 
 #ifdef DEBUG
-#define DEBUG_LOG(fmt, ...) fprintf(stderr, fmt, __VA_ARGS__)
+#define DEBUG_LOG(fmt, ...) fprintf(stderr, fmt, ##__VA_ARGS__)
 #else
 #define DEBUG_LOG(fmt, ...)
 #endif
