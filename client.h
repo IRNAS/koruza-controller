@@ -23,6 +23,6 @@
 
 int client_connect(ucl_object_t *cfg_server);
 bool client_send_device_command(int client_fd, const char *command, char **response);
-bool client_request_device_state(int client_fd, bool format);
+bool client_request_device_state(int client_fd, const char *command, bool format);
 
 #endif

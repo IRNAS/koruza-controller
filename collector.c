@@ -120,6 +120,22 @@ bool start_collector(ucl_object_t *config)
     return false;
   }
 
+  ucl_object_t *cfg_client = ucl_object_find_key(config, "client");
+  if (!cfg_client) {
+    fprintf(stderr, "ERROR: Missing client configuration!\n");
+    return false;
+  }
+
+  const char *status_command;
+  ucl_object_t *obj = ucl_object_find_key(cfg_client, "status_command");
+  if (!obj) {
+    fprintf(stderr, "ERROR: Missing 'status_command' in configuration file!\n");
+    return false;
+  } else if (!ucl_object_tostring_safe(obj, &status_command)) {
+    fprintf(stderr, "ERROR: Status command must be a string!\n");
+    return false;
+  }
+
   utimer_t timer_poll = timer_now();
   double poll_interval_sec;
   utimer_t poll_interval_msec;
@@ -136,7 +152,7 @@ bool start_collector(ucl_object_t *config)
   const char *log_filename;
   const char *state_filename;
 
-  ucl_object_t *obj = ucl_object_find_key(cfg_collector, "log_file");
+  obj = ucl_object_find_key(cfg_collector, "log_file");
   if (!obj) {
     fprintf(stderr, "ERROR: Missing 'log_file' in configuration file!\n");
     return false;
@@ -184,7 +200,7 @@ bool start_collector(ucl_object_t *config)
     if (is_timeout(&timer_poll, poll_interval_msec)) {
       char *response;
       DEBUG_LOG("Requesting data from server.\n");
-      if (!client_send_device_command(client_fd, "A 4\n", &response))
+      if (!client_send_device_command(client_fd, status_command, &response))
         continue;
 
       // Check for state file truncation -- in this case reset all state

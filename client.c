@@ -166,10 +166,10 @@ bool client_send_device_command(int client_fd, const char *command, char **respo
  * @param format Should the output contain beginning/end formatting
  * @return True on success, false when some error has ocurred
  */
-bool client_request_device_state(int client_fd, bool format)
+bool client_request_device_state(int client_fd, const char *command, bool format)
 {
   char *response;
-  if (!client_send_device_command(client_fd, "A 4\n", &response))
+  if (!client_send_device_command(client_fd, command, &response))
     return false;
 
   if (response) {

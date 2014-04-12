@@ -63,11 +63,12 @@ int flush_term(int term_fd, struct termios *p)
  * Starts the device controller that accepts keyboard input on
  * stdin and transmits commands based on the configuration file.
  *
- * @param commands Commands configuration option
+ * @param config Controller configuration object
+ * @param status_command Status command
  * @param client_fd Connection to server file descriptor
  * @return True on success, false when some error has ocurred
  */
-bool start_manual_controller(ucl_object_t *config, int client_fd)
+bool start_manual_controller(ucl_object_t *config, const char *status_command, int client_fd)
 {
   struct timespec tsp = {0, 500};
   struct termios attr;
@@ -102,7 +103,7 @@ bool start_manual_controller(ucl_object_t *config, int client_fd)
   for (;;) {
     // Periodically request device state
     if (is_timeout(&timer_refresh_controller, status_refresh_interval_msec)) {
-      if (!client_request_device_state(client_fd, true)) {
+      if (!client_request_device_state(client_fd, status_command, true)) {
         ret_flag = false;
         break;
       }
@@ -190,17 +191,33 @@ bool start_controller(ucl_object_t *config, bool status_only)
     return false;
   }
 
+  ucl_object_t *cfg_client = ucl_object_find_key(config, "client");
+  if (!cfg_client) {
+    fprintf(stderr, "ERROR: Missing client configuration!\n");
+    return false;
+  }
+
+  const char *status_command;
+  ucl_object_t *obj = ucl_object_find_key(cfg_client, "status_command");
+  if (!obj) {
+    fprintf(stderr, "ERROR: Missing 'status_command' in configuration file!\n");
+    return false;
+  } else if (!ucl_object_tostring_safe(obj, &status_command)) {
+    fprintf(stderr, "ERROR: Status command must be a string!\n");
+    return false;
+  }
+
   int client_fd = client_connect(cfg_server);
   if (client_fd < 0)
     return false;
 
   if (status_only) {
-    client_request_device_state(client_fd, false);
+    client_request_device_state(client_fd, status_command, false);
   } else {
     fprintf(stderr, "INFO: Controller ready and accepting commands.\n");
     fprintf(stderr, "INFO: Press 'esc' to quit.\n");
 
-    start_manual_controller(cfg_controller, client_fd);
+    start_manual_controller(cfg_controller, status_command, client_fd);
 
     fprintf(stderr, "INFO: Closing controller.\n");
   }
