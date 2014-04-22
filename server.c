@@ -296,6 +296,22 @@ void server_serial_read_cb(struct bufferevent *bev, void *ctx)
 }
 
 /**
+ * Callback for serial port exceptional events.
+ *
+ * @param bev Buffer event
+ * @param events Event mask
+ * @param ctx Connection context
+ */
+void server_serial_event_cb(struct bufferevent *bev, short events, void *ctx)
+{
+  struct connection_context_t *connection = (struct connection_context_t*) ctx;
+
+  if (events & (BEV_EVENT_ERROR | BEV_EVENT_EOF)) {
+    syslog(LOG_ERR, "Error event detected on serial port!");
+  }
+}
+
+/**
  * Starts the server.
  *
  * @param config Root configuration object
@@ -402,7 +418,7 @@ bool start_server(ucl_object_t *config, int log_option)
 
   // Listen for serial port I/O
   ctx.serial_bev = bufferevent_socket_new(base, serial_fd, BEV_OPT_CLOSE_ON_FREE);
-  bufferevent_setcb(ctx.serial_bev, server_serial_read_cb, NULL, NULL, &ctx);
+  bufferevent_setcb(ctx.serial_bev, server_serial_read_cb, NULL, server_serial_event_cb, &ctx);
   bufferevent_enable(ctx.serial_bev, EV_READ | EV_WRITE);
 
   syslog(LOG_INFO, "Entering dispatch loop.");
