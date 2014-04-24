@@ -251,6 +251,30 @@ void server_accept_conn_cb(struct evconnlistener *listener,
   syslog(LOG_INFO, "Accepted new connection.");
 }
 
+void server_serial_command_done(struct server_context_t *server)
+{
+  server->rsp_length = 0;
+
+  // Cancel response timeout timer
+  if (server->timeout_event)
+    evtimer_del(server->timeout_event);
+
+  if (server->cmd_queue_start != NULL) {
+    // Dequeue next message and send it to device
+    struct command_queue_t *cmd = server->cmd_queue_start;
+    server->active_connection = cmd->connection;
+    server->cmd_queue_start = cmd->next;
+    if (server->cmd_queue_start == NULL)
+      server->cmd_queue_tail = NULL;
+
+    server_serial_send_command(server, cmd->command, cmd->cmd_length);
+    free(cmd->command);
+    free(cmd);
+  } else {
+    server->active_connection = NULL;
+  }
+}
+
 /**
  * Performs a serial port reset, aborting any pending commands.
  *
@@ -293,6 +317,12 @@ bool server_serial_reset(struct server_context_t *server, bool fail_active)
   server->serial_bev = bufferevent_socket_new(server->base, serial_fd, BEV_OPT_CLOSE_ON_FREE);
   bufferevent_setcb(server->serial_bev, server_serial_read_cb, NULL, server_serial_event_cb, server);
   bufferevent_enable(server->serial_bev, EV_READ | EV_WRITE);
+
+  // Process next command in queue (if any)
+  if (fail_active) {
+    server_serial_command_done(server);
+  }
+
   return true;
 }
 
@@ -321,6 +351,7 @@ void server_serial_start_response_timer(struct server_context_t *server)
   if (!server->timeout_event)
     server->timeout_event = evtimer_new(server->base, server_serial_read_response_timeout_cb, server);
   evtimer_add(server->timeout_event, &one_sec);
+  DEBUG_LOG("DEBUG: Scheduled serial read timeout event.\n");
 }
 
 /**
@@ -386,26 +417,7 @@ void server_serial_read_cb(struct bufferevent *bev, void *ctx)
   // Detect the end of message
   if (strncmp(server->response + server->rsp_length - 9, "\r\n#STOP\r\n", 9) == 0) {
     DEBUG_LOG("DEBUG: Received end of message from device.\n");
-    server->rsp_length = 0;
-
-    // Cancel response timeout timer
-    if (server->timeout_event)
-      evtimer_del(server->timeout_event);
-
-    if (server->cmd_queue_start != NULL) {
-      // Dequeue next message and send it to device
-      struct command_queue_t *cmd = server->cmd_queue_start;
-      server->active_connection = cmd->connection;
-      server->cmd_queue_start = cmd->next;
-      if (server->cmd_queue_start == NULL)
-        server->cmd_queue_tail = NULL;
-
-      server_serial_send_command(server, cmd->command, cmd->cmd_length);
-      free(cmd->command);
-      free(cmd);
-    } else {
-      server->active_connection = NULL;
-    }
+    server_serial_command_done(server);
   }
 }
 
