@@ -77,10 +77,8 @@ int main(int argc, char **argv)
     }
   }
 
-  if (config_file == NULL) {
-    fprintf(stderr, "ERROR: Config file path argument is required!\n");
-    return 1;
-  }
+  if (config_file == NULL)
+    config_file = strdup("/etc/koruza.cfg");
 
   // Load the configuration file
   struct ucl_parser *parser = ucl_parser_new(UCL_PARSER_KEY_LOWERCASE);
