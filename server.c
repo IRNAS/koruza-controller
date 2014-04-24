@@ -50,14 +50,22 @@ struct command_queue_t {
 };
 
 struct server_context_t {
+  /// Event base
+  struct event_base *base;
+  /// Request timeout event
+  struct event *timeout_event;
   /// Currently active connection (can be NULL)
   struct connection_context_t *active_connection;
   /// Command queue start
   struct command_queue_t *cmd_queue_start;
   /// Command queue tail
   struct command_queue_t *cmd_queue_tail;
+  /// Serial device inode path
+  const char *serial_device;
   /// Serial device buffer
   struct bufferevent *serial_bev;
+  /// Serial port configuration
+  struct termios serial_tio;
   /// Current response buffer
   char *response;
   /// Response length
@@ -74,6 +82,12 @@ struct connection_context_t {
   /// Current command length
   size_t cmd_length;
 };
+
+// Forward declarations
+void server_serial_start_response_timer(struct server_context_t *server);
+void server_serial_read_cb(struct bufferevent *bev, void *ctx);
+void server_serial_event_cb(struct bufferevent *bev, short events, void *ctx);
+void server_serial_send_command(struct server_context_t *server, const char *command, size_t length);
 
 /**
  * Creates a new connection context.
@@ -102,6 +116,11 @@ void connection_context_free(struct connection_context_t *ctx)
 {
   if (!ctx)
     return;
+
+  if (ctx->server->active_connection == ctx) {
+    // The connection that we are freeing is a currently active connection
+    ctx->server->active_connection = NULL;
+  }
 
   bufferevent_free(ctx->conn_bev);
   free(ctx);
@@ -146,9 +165,7 @@ bool server_send_command(struct connection_context_t *connection, const char *co
   } else {
     // Write command immediately
     server->active_connection = connection;
-    bufferevent_write(server->serial_bev, command, size);
-
-    DEBUG_LOG("DEBUG: Command sent to device.\n");
+    server_serial_send_command(server, command, size);
   }
 
   return true;
@@ -235,6 +252,100 @@ void server_accept_conn_cb(struct evconnlistener *listener,
 }
 
 /**
+ * Performs a serial port reset, aborting any pending commands.
+ *
+ * @param server Server context
+ */
+bool server_serial_reset(struct server_context_t *server, bool fail_active)
+{
+  // Fail the currently active command
+  if (fail_active && server->active_connection) {
+    bufferevent_write(server->active_connection->conn_bev, "#ERROR\r\n#STOP\r\n", 15);
+  }
+
+  // Reset serial port
+  if (server->serial_bev) {
+    bufferevent_free(server->serial_bev);
+    server->serial_bev = NULL;
+  }
+
+  int serial_fd = open(server->serial_device, O_RDWR);
+  if (serial_fd == -1) {
+    syslog(LOG_ERR, "Failed to reopen serial device '%s'!", server->serial_device);
+    server_serial_start_response_timer(server);
+    return false;
+  }
+
+  if (fcntl(serial_fd, F_SETFL, O_NONBLOCK) < 0) {
+    syslog(LOG_ERR, "Failed to reconfigure serial port.");
+    close(serial_fd);
+    server_serial_start_response_timer(server);
+    return false;
+  }
+
+  if (tcsetattr(serial_fd, TCSAFLUSH, &server->serial_tio) < 0) {
+    syslog(LOG_ERR, "Failed to reconfigure serial port!");
+    server_serial_start_response_timer(server);
+    return false;
+  }
+
+  // Listen for serial port I/O
+  server->serial_bev = bufferevent_socket_new(server->base, serial_fd, BEV_OPT_CLOSE_ON_FREE);
+  bufferevent_setcb(server->serial_bev, server_serial_read_cb, NULL, server_serial_event_cb, server);
+  bufferevent_enable(server->serial_bev, EV_READ | EV_WRITE);
+  return true;
+}
+
+/**
+ * Response timeout callback.
+ *
+ * @param fd Serial socket
+ * @param events Event mask
+ * @param ctx Server context
+ */
+void server_serial_read_response_timeout_cb(evutil_socket_t fd, short events, void *ctx)
+{
+  struct server_context_t *server = (struct server_context_t*) ctx;
+  syslog(LOG_ERR, "Read from serial port timed out, resetting port.");
+  server_serial_reset(server, true);
+}
+
+/**
+ * Starts the response timeout timer.
+ *
+ * @param server Server context
+ */
+void server_serial_start_response_timer(struct server_context_t *server)
+{
+  struct timeval one_sec = { 1, 0 };
+  if (!server->timeout_event)
+    server->timeout_event = evtimer_new(server->base, server_serial_read_response_timeout_cb, server);
+  evtimer_add(server->timeout_event, &one_sec);
+}
+
+/**
+ * Sends a command to the underlying serial device.
+ *
+ * @param server Server context
+ * @param command Command to send
+ * @param length Command length
+ */
+void server_serial_send_command(struct server_context_t *server, const char *command, size_t length)
+{
+  server_serial_start_response_timer(server);
+
+  if (!server->serial_bev && !server_serial_reset(server, false)) {
+    syslog(LOG_ERR, "Failed to reset serial port before command, returning error!");
+
+    if (server->active_connection)
+      bufferevent_write(server->active_connection->conn_bev, "#ERROR\r\n#STOP\r\n", 15);
+  } else {
+    bufferevent_write(server->serial_bev, command, length);
+    DEBUG_LOG("DEBUG: Next command sent to device: %s", command);
+  }
+}
+
+/**
  * Callback for serial port read events.
  *
  * @param bev Buffer event
@@ -277,6 +388,10 @@ void server_serial_read_cb(struct bufferevent *bev, void *ctx)
     DEBUG_LOG("DEBUG: Received end of message from device.\n");
     server->rsp_length = 0;
 
+    // Cancel response timeout timer
+    if (server->timeout_event)
+      evtimer_del(server->timeout_event);
+
     if (server->cmd_queue_start != NULL) {
       // Dequeue next message and send it to device
       struct command_queue_t *cmd = server->cmd_queue_start;
@@ -285,8 +400,7 @@ void server_serial_read_cb(struct bufferevent *bev, void *ctx)
       if (server->cmd_queue_start == NULL)
         server->cmd_queue_tail = NULL;
 
-      bufferevent_write(server->serial_bev, cmd->command, cmd->cmd_length);
-      DEBUG_LOG("DEBUG: Next command sent to device: %s", cmd->command);
+      server_serial_send_command(server, cmd->command, cmd->cmd_length);
       free(cmd->command);
       free(cmd);
     } else {
@@ -304,10 +418,11 @@ void server_serial_read_cb(struct bufferevent *bev, void *ctx)
  */
 void server_serial_event_cb(struct bufferevent *bev, short events, void *ctx)
 {
-  struct connection_context_t *connection = (struct connection_context_t*) ctx;
+  struct server_context_t *server = (struct server_context_t*) ctx;
 
   if (events & (BEV_EVENT_ERROR | BEV_EVENT_EOF)) {
-    syslog(LOG_ERR, "Error event detected on serial port!");
+    syslog(LOG_ERR, "Error event detected on serial port, resetting port!");
+    server_serial_reset(server, true);
   }
 }
 
@@ -320,17 +435,25 @@ void server_serial_event_cb(struct bufferevent *bev, short events, void *ctx)
  */
 bool start_server(ucl_object_t *config, int log_option)
 {
-  const char *device;
   int64_t baudrate;
   ucl_object_t *obj = NULL;
   bool ret_value = false;
   int serial_fd = -1;
 
+  // Create the server context
+  struct server_context_t ctx;
+  ctx.timeout_event = NULL;
+  ctx.active_connection = NULL;
+  ctx.cmd_queue_start = NULL;
+  ctx.cmd_queue_tail = NULL;
+  ctx.response = NULL;
+  ctx.rsp_length = 0;
+
   obj = ucl_object_find_key(config, "device");
   if (!obj) {
     fprintf(stderr, "ERROR: Missing 'device' in configuration file!\n");
     goto cleanup_exit;
-  } else if (!ucl_object_tostring_safe(obj, &device)) {
+  } else if (!ucl_object_tostring_safe(obj, &ctx.serial_device)) {
     fprintf(stderr, "ERROR: Device must be a string!\n");
     goto cleanup_exit;
   }
@@ -345,9 +468,9 @@ bool start_server(ucl_object_t *config, int log_option)
   }
 
   // Open the serial device
-  serial_fd = open(device, O_RDWR);
+  serial_fd = open(ctx.serial_device, O_RDWR);
   if (serial_fd == -1) {
-    fprintf(stderr, "ERROR: Failed to open the serial device '%s'!\n", device);
+    fprintf(stderr, "ERROR: Failed to open the serial device '%s'!\n", ctx.serial_device);
     goto cleanup_exit;
   }
 
@@ -357,8 +480,7 @@ bool start_server(ucl_object_t *config, int log_option)
   }
 
   // Configure the serial device
-  struct termios tio;
-  if (tcgetattr(serial_fd, &tio) < 0) {
+  if (tcgetattr(serial_fd, &ctx.serial_tio) < 0) {
     fprintf(stderr, "ERROR: Failed to configure the serial device!\n");
     goto cleanup_exit;
   }
@@ -390,11 +512,11 @@ bool start_server(ucl_object_t *config, int log_option)
     }
   }
 
-  cfmakeraw(&tio);
-  cfsetispeed(&tio, speed);
-  cfsetospeed(&tio, speed);
+  cfmakeraw(&ctx.serial_tio);
+  cfsetispeed(&ctx.serial_tio, speed);
+  cfsetospeed(&ctx.serial_tio, speed);
 
-  if (tcsetattr(serial_fd, TCSAFLUSH, &tio) < 0) {
+  if (tcsetattr(serial_fd, TCSAFLUSH, &ctx.serial_tio) < 0) {
     fprintf(stderr, "ERROR: Failed to configure the serial device!\n");
     goto cleanup_exit;
   }
@@ -402,18 +524,11 @@ bool start_server(ucl_object_t *config, int log_option)
   // Open the syslog facility
   openlog("koruza-control", log_option, LOG_DAEMON);
   syslog(LOG_INFO, "KORUZA control daemon starting up.");
-  syslog(LOG_INFO, "Connected to device '%s'.", device);
-
-  // Create the server context
-  struct server_context_t ctx;
-  ctx.active_connection = NULL;
-  ctx.cmd_queue_start = NULL;
-  ctx.cmd_queue_tail = NULL;
-  ctx.response = NULL;
-  ctx.rsp_length = 0;
+  syslog(LOG_INFO, "Connected to device '%s'.", ctx.serial_device);
 
   // Setup the event loop
   struct event_base *base = event_base_new();
+  ctx.base = base;
 
   // Setup the UNIX socket
   struct sockaddr_un address;

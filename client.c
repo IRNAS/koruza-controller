@@ -88,25 +88,16 @@ bool client_send_device_command(int client_fd, const char *command, char **respo
     return false;
   }
 
-  DEBUG_LOG("DEBUG: Waiting for response header from server.\n");
+  DEBUG_LOG("DEBUG: Waiting for response from server.\n");
 
   // Parse response from device
-  char buffer[4096];
-  memset(buffer, 0, sizeof(buffer));
-  if (read(client_fd, buffer, 8) < 0) {
-    fprintf(stderr, "ERROR: Failed to read response header from server!\n");
-    return false;
-  } else if (strcmp(buffer, "#START\r\n") != 0) {
-    fprintf(stderr, "ERROR: Failed to parse response header from server!\n");
-    fprintf(stderr, "ERROR: Expected '#START', received: %s", buffer);
-    return false;
-  }
-
 #define MAX_RESPONSE_LINES 128
+  char buffer[4096];
   int line;
   char *buffer_p = (char*) buffer;
   size_t buffer_size = 0;
   size_t response_size = 0;
+  bool received_header = false;
   memset(buffer, 0, sizeof(buffer));
   for (line = 0; line < MAX_RESPONSE_LINES;) {
     if (buffer_size >= sizeof(buffer)) {
@@ -141,9 +132,23 @@ bool client_send_device_command(int client_fd, const char *command, char **respo
 
     DEBUG_LOG("DEBUG: Got response line: %s", buffer);
 
-    if (strncmp(buffer, "#STOP\n", sizeof(buffer)) == 0) {
+    if (strncmp(buffer, "#START\n", sizeof(buffer)) == 0) {
+      DEBUG_LOG("DEBUG: Detected start message.\n");
+      memset(buffer, 0, buffer_size);
+      buffer_size = 0;
+      received_header = true;
+      continue;
+    } else if (strncmp(buffer, "#STOP\n", sizeof(buffer)) == 0) {
       DEBUG_LOG("DEBUG: Detected stop message.\n");
       break;
+    }
+
+    if (!received_header) {
+      fprintf(stderr, "WARNING: Received response line before header start:\n");
+      fprintf(stderr, "WARNING: %s", buffer);
+      memset(buffer, 0, buffer_size);
+      buffer_size = 0;
+      continue;
     }
 
     size_t offset = response_size;
