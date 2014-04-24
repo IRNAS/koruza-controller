@@ -20,7 +20,7 @@
 #define KORUZA_CONTROLLER_GLOBAL_H
 
 // Uncomment this to enable verbose debug output
-#define DEBUG
+//#define DEBUG
 
 #ifdef DEBUG
 #define DEBUG_LOG(fmt, ...) fprintf(stderr, fmt, ##__VA_ARGS__)
