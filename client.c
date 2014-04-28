@@ -92,6 +92,7 @@ bool client_send_device_command(int client_fd, const char *command, char **respo
 
   // Parse response from device
 #define MAX_RESPONSE_LINES 128
+  bool result = true;
   char buffer[4096];
   int line;
   char *buffer_p = (char*) buffer;
@@ -138,6 +139,13 @@ bool client_send_device_command(int client_fd, const char *command, char **respo
       buffer_size = 0;
       received_header = true;
       continue;
+    } else if (strncmp(buffer, "#ERROR\n", sizeof(buffer)) == 0) {
+      DEBUG_LOG("DEBUG: Detected error message.\n");
+      memset(buffer, 0, buffer_size);
+      buffer_size = 0;
+      received_header = true;
+      result = false;
+      continue;
     } else if (strncmp(buffer, "#STOP\n", sizeof(buffer)) == 0) {
       DEBUG_LOG("DEBUG: Detected stop message.\n");
       break;
@@ -161,7 +169,7 @@ bool client_send_device_command(int client_fd, const char *command, char **respo
     buffer_size = 0;
   }
 
-  return true;
+  return result;
 }
 
 /**
