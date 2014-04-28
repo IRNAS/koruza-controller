@@ -70,6 +70,8 @@ struct server_context_t {
   char *response;
   /// Response length
   size_t rsp_length;
+  /// Device reset hook
+  const char *hook_device_reset;
 };
 
 struct connection_context_t {
@@ -287,10 +289,22 @@ bool server_serial_reset(struct server_context_t *server, bool fail_active)
     bufferevent_write(server->active_connection->conn_bev, "#ERROR\r\n#STOP\r\n", 15);
   }
 
-  // Reset serial port
+  // Close serial port
   if (server->serial_bev) {
     bufferevent_free(server->serial_bev);
     server->serial_bev = NULL;
+  }
+
+  // Call external script to perform device reset
+  if (server->hook_device_reset != NULL) {
+    pid_t pid = fork();
+    if (pid == 0) {
+      execl(server->hook_device_reset, server->hook_device_reset, (char*) NULL);
+      exit(1);
+    } else {
+      int status;
+      waitpid(pid, &status, 0);
+    }
   }
 
   int serial_fd = open(server->serial_device, O_RDWR);
@@ -460,6 +474,7 @@ bool start_server(ucl_object_t *config, int log_option)
   ctx.cmd_queue_tail = NULL;
   ctx.response = NULL;
   ctx.rsp_length = 0;
+  ctx.hook_device_reset = NULL;
 
   obj = ucl_object_find_key(config, "device");
   if (!obj) {
@@ -533,10 +548,25 @@ bool start_server(ucl_object_t *config, int log_option)
     goto cleanup_exit;
   }
 
+  // Configure hooks
+  ucl_object_t *hooks = ucl_object_find_key(config, "hooks");
+  if (obj) {
+    // Device reset hook
+    obj = ucl_object_find_key(hooks, "reset");
+    if (obj && !ucl_object_tostring_safe(obj, &ctx.hook_device_reset)) {
+      fprintf(stderr, "ERROR: Hook 'reset' must be a string!\n");
+      goto cleanup_exit;
+    }
+  }
+
   // Open the syslog facility
   openlog("koruza-control", log_option, LOG_DAEMON);
   syslog(LOG_INFO, "KORUZA control daemon starting up.");
   syslog(LOG_INFO, "Connected to device '%s'.", ctx.serial_device);
+
+  if (ctx.hook_device_reset) {
+    syslog(LOG_INFO, "Device reset hook configured: %s", ctx.hook_device_reset);
+  }
 
   // Setup the event loop
   struct event_base *base = event_base_new();
