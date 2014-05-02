@@ -28,6 +28,7 @@
 #include <time.h>
 #include <termios.h>
 #include <ucl.h>
+#include <signal.h>
 
 #include <event2/event.h>
 #include <event2/listener.h>
@@ -465,6 +466,9 @@ bool start_server(ucl_object_t *config, int log_option)
   ucl_object_t *obj = NULL;
   bool ret_value = false;
   int serial_fd = -1;
+
+  // Install signal handlers
+  signal(SIGPIPE, SIG_IGN);
 
   // Create the server context
   struct server_context_t ctx;

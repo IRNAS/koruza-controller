@@ -24,6 +24,7 @@
 #include <errno.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <signal.h>
 
 /**
  * Establishes a connection with the control server.
@@ -33,6 +34,9 @@
  */
 int client_connect(ucl_object_t *cfg_server)
 {
+  // Install signal handlers
+  signal(SIGPIPE, SIG_IGN);
+
   // Setup the UNIX socket
   struct sockaddr_un address;
   memset(&address, 0, sizeof(address));
