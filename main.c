@@ -108,7 +108,7 @@ int main(int argc, char **argv)
 
     start_server(obj, log_option);
   } else if (collector) {
-    start_collector(config);
+    start_collector(config, log_option);
   } else {
     start_controller(config, status_only);
   }

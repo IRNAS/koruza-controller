@@ -21,6 +21,6 @@
 
 #include <ucl.h>
 
-bool start_collector(ucl_object_t *config);
+bool start_collector(ucl_object_t *config, int log_option);
 
 #endif

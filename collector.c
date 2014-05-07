@@ -26,6 +26,7 @@
 #include <errno.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <syslog.h>
 #include <zlib.h>
 
 struct log_item_t {
@@ -104,9 +105,10 @@ void collector_parse_response(struct log_item_t **log_table,
  * Starts the collector.
  *
  * @param config Root configuration object
+ * @param log_option Syslog flags
  * @return True on success, false when some error has ocurred
  */
-bool start_collector(ucl_object_t *config)
+bool start_collector(ucl_object_t *config, int log_option)
 {
   ucl_object_t *cfg_server = ucl_object_find_key(config, "server");
   if (!cfg_server) {
@@ -185,13 +187,16 @@ bool start_collector(ucl_object_t *config)
   poll_interval_msec = (long) (poll_interval_sec * 1000);
 
   int client_fd = client_connect(cfg_server);
-  if (client_fd < 0)
-    return false;
+
+  // Open the syslog facility
+  openlog("koruza-collector", 0, LOG_DAEMON);
+  syslog(LOG_INFO, "KORUZA collector daemon starting up.");
 
   struct log_item_t *log_table = NULL;
   size_t state_file_size = 0;
   size_t log_file_size = 0;
   struct timespec tsp = {0, 10000000};
+  size_t cmd_failures = 0;
 
   for (;;) {
     nanosleep(&tsp, NULL);
@@ -200,8 +205,17 @@ bool start_collector(ucl_object_t *config)
     if (is_timeout(&timer_poll, poll_interval_msec)) {
       char *response;
       DEBUG_LOG("Requesting data from server.\n");
-      if (!client_send_device_command(client_fd, status_command, &response))
+      if (!client_send_device_command(client_fd, status_command, &response)) {
+        syslog(LOG_WARNING, "Failed to receive data from control daeamon!");
+
+        if (++cmd_failures > 5) {
+          syslog(LOG_ERR, "Multiple failures while requesting data, reconnecting...");
+          close(client_fd);
+          client_fd = client_connect(cfg_server);
+          cmd_failures = 0;
+        }
         continue;
+      }
 
       // Check for state file truncation -- in this case reset all state
       struct stat stats;
