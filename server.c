@@ -468,6 +468,7 @@ bool start_server(ucl_object_t *config, int log_option)
   int serial_fd = -1;
 
   // Install signal handlers
+  signal(SIGHUP, SIG_IGN);
   signal(SIGPIPE, SIG_IGN);
 
   // Create the server context
