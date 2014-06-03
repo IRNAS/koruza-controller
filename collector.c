@@ -38,6 +38,10 @@ struct log_item_t {
   size_t count;
   /// Sum of stored values
   double sum;
+  /// Maximum of stored values
+  double max;
+  /// Minimum of stored values
+  double min;
 
   UT_hash_handle hh;
 };
@@ -60,32 +64,60 @@ void collector_parse_response(struct log_item_t **log_table,
       break;
 
     char key[256] = {0,};
+    char op[128] = {0,};
     char value_str[256] = {0,};
     double value;
 
-    if (sscanf(line, "%[^:]%*c%lf", key, &value) == 2) {
-      // Value line -- store into the log hash table
-      struct log_item_t *item;
-      HASH_FIND_STR(*log_table, key, item);
-      if (!item) {
-        // Create new item and store it
-        item = (struct log_item_t*) malloc(sizeof(struct log_item_t));
-        item->key = strdup(key);
-        item->count = 0;
-        item->sum = 0.0;
-
-        HASH_ADD_KEYPTR(hh, *log_table, item->key, strlen(item->key), item);
-      }
-
-      item->last = value;
-      item->count++;
-      item->sum += value;
-
-      fprintf(state, "%s: %f\n", item->key, item->sum / item->count);
+    if (sscanf(line, "%[^:]%*c %[^:]%*c%lf", key, op, &value) == 3) {
+      // Value line with operator specification
+    } else if (sscanf(line, "%[^:]%*c%lf", key, &value) == 2) {
+      // Value line specification, default to "avg" operator
+      strcpy(op, "avg");
     } else if (sscanf(line, "%[^:]: %250s", key, value_str) == 2) {
       // Nodewatcher metadata line -- output unchanged line to state file
       fprintf(state, "%s\n", line);
+      continue;
+    } else {
+      continue;
     }
+
+    // Value line -- store into the log hash table
+    struct log_item_t *item;
+    HASH_FIND_STR(*log_table, key, item);
+    if (!item) {
+      // Create new item and store it
+      item = (struct log_item_t*) malloc(sizeof(struct log_item_t));
+      item->key = strdup(key);
+      item->count = 0;
+      item->sum = 0.0;
+      item->min = value;
+      item->max = value;
+
+      HASH_ADD_KEYPTR(hh, *log_table, item->key, strlen(item->key), item);
+    }
+
+    item->last = value;
+    item->count++;
+    item->sum += value;
+    if (value < item->min)
+      item->min = value;
+    if (value > item->max)
+      item->max = value;
+
+    // Calculate value based on selected operator
+    double derived;
+    if (strcmp(op, "min") == 0)
+      derived = item->min;
+    else if (strcmp(op, "max") == 0)
+      derived = item->max;
+    else if (strcmp(op, "sum") == 0)
+      derived = item->sum;
+    else if (strcmp(op, "avg") == 0)
+      derived = item->sum / item->count;
+    else
+      derived = item->sum / item->count;
+
+    fprintf(state, "%s: %f\n", item->key, derived);
   }
 
   free(rsp);
