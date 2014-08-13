@@ -39,6 +39,8 @@ struct collector_cfg_t {
 struct log_item_t {
   /// Unique item key
   char *key;
+  /// Unique item short key
+  int key_short;
   /// Last stored value
   double last;
   /// Number of stored values
@@ -72,6 +74,7 @@ void collector_parse_response(struct collector_cfg_t *cfg,
       break;
 
     char key[256] = {0,};
+    int key_short = -1;
     char op[128] = {0,};
     char value_str[256] = {0,};
     double value;
@@ -91,15 +94,17 @@ void collector_parse_response(struct collector_cfg_t *cfg,
 
     // Support shortened output format for names and values
     char *endptr = NULL;
-    strtol(key, &endptr, 10);
+    key_short = strtol(key, &endptr, 10);
     if (*endptr == 0) {
-      char fmt_key[256] = {0, };
+      char fmt_key[256] = {0,};
       if (metadata)
         snprintf(fmt_key, sizeof(fmt_key), cfg->of_name, key);
       else
         snprintf(fmt_key, sizeof(fmt_key), cfg->of_value, key);
 
       strncpy(key, fmt_key, sizeof(key));
+    } else {
+      key_short = -1;
     }
 
     if (metadata) {
@@ -114,6 +119,7 @@ void collector_parse_response(struct collector_cfg_t *cfg,
       // Create new item and store it
       item = (struct log_item_t*) malloc(sizeof(struct log_item_t));
       item->key = strdup(key);
+      item->key_short = key_short;
       item->count = 0;
       item->sum = 0.0;
       item->min = value;
@@ -152,7 +158,10 @@ void collector_parse_response(struct collector_cfg_t *cfg,
   struct log_item_t *item;
 
   for (item = *log_table; item != NULL; item = item->hh.next) {
-    gzprintf(log, "%d\t%s\t%f\n", time(NULL), item->key, item->last);
+    if (item->key_short >= 0)
+      gzprintf(log, "%d\t%d\t%f\n", time(NULL), item->key_short, item->last);
+    else
+      gzprintf(log, "%d\t%s\t%f\n", time(NULL), item->key, item->last);
   }
 
   fflush(state);
