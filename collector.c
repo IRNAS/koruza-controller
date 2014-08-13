@@ -26,6 +26,7 @@
 #include <errno.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <syslog.h>
 #include <zlib.h>
 
@@ -54,6 +55,16 @@ struct log_item_t {
 
   UT_hash_handle hh;
 };
+
+double collector_get_time()
+{
+  struct timeval tv;
+  if (!gettimeofday(&tv, NULL)) {
+    return tv.tv_sec + ((double) tv.tv_usec / 1000000.0);
+  }
+
+  return (double) time(NULL);
+}
 
 void collector_parse_response(struct collector_cfg_t *cfg,
                               struct log_item_t **log_table,
@@ -157,12 +168,14 @@ void collector_parse_response(struct collector_cfg_t *cfg,
   // Output current state and log last values
   struct log_item_t *item;
 
+  gzprintf(log, "%f", collector_get_time());
   for (item = *log_table; item != NULL; item = item->hh.next) {
     if (item->key_short >= 0)
-      gzprintf(log, "%d\t%d\t%f\n", time(NULL), item->key_short, item->last);
+      gzprintf(log, "\t%d\t%f", item->key_short, item->last);
     else
-      gzprintf(log, "%d\t%s\t%f\n", time(NULL), item->key, item->last);
+      gzprintf(log, "\t%s\t%f", item->key, item->last);
   }
+  gzprintf(log, "\n");
 
   fflush(state);
   gzflush(log, Z_SYNC_FLUSH);
