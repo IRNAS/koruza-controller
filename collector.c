@@ -96,7 +96,7 @@ void collector_parse_response(struct collector_cfg_t *cfg,
     } else if (sscanf(line, "%[^:]%*c%lf", key, &value) == 2) {
       // Value line specification, default to "avg" operator
       strcpy(op, "avg");
-    } else if (sscanf(line, "%[^:]: %250s", key, value_str) == 2) {
+    } else if (sscanf(line, "%[^:]: %250[^\n]", key, value_str) == 2) {
       // Nodewatcher metadata line -- output unchanged line to state file
       metadata = true;
     } else {
