@@ -29,6 +29,13 @@
 #include <syslog.h>
 #include <zlib.h>
 
+struct collector_cfg_t {
+  /// Name format string
+  const char *of_name;
+  /// Value format string
+  const char *of_value;
+};
+
 struct log_item_t {
   /// Unique item key
   char *key;
@@ -46,7 +53,8 @@ struct log_item_t {
   UT_hash_handle hh;
 };
 
-void collector_parse_response(struct log_item_t **log_table,
+void collector_parse_response(struct collector_cfg_t *cfg,
+                              struct log_item_t **log_table,
                               const char *response,
                               gzFile log,
                               FILE *state)
@@ -67,6 +75,7 @@ void collector_parse_response(struct log_item_t **log_table,
     char op[128] = {0,};
     char value_str[256] = {0,};
     double value;
+    bool metadata = false;
 
     if (sscanf(line, "%[^:]%*c %[^:]%*c%lf", key, op, &value) == 3) {
       // Value line with operator specification
@@ -75,9 +84,26 @@ void collector_parse_response(struct log_item_t **log_table,
       strcpy(op, "avg");
     } else if (sscanf(line, "%[^:]: %250s", key, value_str) == 2) {
       // Nodewatcher metadata line -- output unchanged line to state file
-      fprintf(state, "%s\n", line);
-      continue;
+      metadata = true;
     } else {
+      continue;
+    }
+
+    // Support shortened output format for names and values
+    char *endptr = NULL;
+    strtol(key, &endptr, 10);
+    if (*endptr == 0) {
+      char fmt_key[256] = {0, };
+      if (metadata)
+        snprintf(fmt_key, sizeof(fmt_key), cfg->of_name, key);
+      else
+        snprintf(fmt_key, sizeof(fmt_key), cfg->of_value, key);
+
+      strncpy(key, fmt_key, sizeof(key));
+    }
+
+    if (metadata) {
+      fprintf(state, "%s: %s\n", key, value_str);
       continue;
     }
 
@@ -204,6 +230,32 @@ bool start_collector(ucl_object_t *config, int log_option)
     return false;
   }
 
+  struct collector_cfg_t cfg;
+
+  obj = ucl_object_find_key(cfg_collector, "output_formatter");
+  if (!obj) {
+    fprintf(stderr, "ERROR: Missing 'output_formatter' section in configuration file!\n");
+    return false;
+  } else {
+    ucl_object_t *of_obj = ucl_object_find_key(obj, "name");
+    if (!of_obj) {
+      fprintf(stderr, "ERROR: Missing 'output_formatter.name' in configuration file!\n");
+      return false;
+    } else if (!ucl_object_tostring_safe(of_obj, &cfg.of_name)) {
+      fprintf(stderr, "ERROR: Name format must be a string!\n");
+      return false;
+    }
+
+    of_obj = ucl_object_find_key(obj, "value");
+    if (!of_obj) {
+      fprintf(stderr, "ERROR: Missing 'key_formatter.value' in configuration file!\n");
+      return false;
+    } else if (!ucl_object_tostring_safe(of_obj, &cfg.of_value)) {
+      fprintf(stderr, "ERROR: Value format must be a string!\n");
+      return false;
+    }
+  }
+
   FILE *log_file = fopen(log_filename, "w");
   if (!log_file) {
     fprintf(stderr, "ERROR: Unable to open log file.\n");
@@ -293,7 +345,7 @@ bool start_collector(ucl_object_t *config, int log_option)
 
       log_file_size = stats.st_size;
 
-      collector_parse_response(&log_table, response, log_file_gz, state_file);
+      collector_parse_response(&cfg, &log_table, response, log_file_gz, state_file);
       free(response);
     }
   }
