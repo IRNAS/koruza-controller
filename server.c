@@ -87,7 +87,7 @@ struct connection_context_t {
 };
 
 // Forward declarations
-void server_serial_start_response_timer(struct server_context_t *server);
+void server_serial_start_response_timer(struct server_context_t *server, int timeout);
 void server_serial_read_cb(struct bufferevent *bev, void *ctx);
 void server_serial_event_cb(struct bufferevent *bev, short events, void *ctx);
 void server_serial_send_command(struct server_context_t *server, const char *command, size_t length);
@@ -311,20 +311,20 @@ bool server_serial_reset(struct server_context_t *server, bool fail_active)
   int serial_fd = open(server->serial_device, O_RDWR);
   if (serial_fd == -1) {
     syslog(LOG_ERR, "Failed to reopen serial device '%s'!", server->serial_device);
-    server_serial_start_response_timer(server);
+    server_serial_start_response_timer(server, 5);
     return false;
   }
 
   if (fcntl(serial_fd, F_SETFL, O_NONBLOCK) < 0) {
     syslog(LOG_ERR, "Failed to reconfigure serial port.");
     close(serial_fd);
-    server_serial_start_response_timer(server);
+    server_serial_start_response_timer(server, 2);
     return false;
   }
 
   if (tcsetattr(serial_fd, TCSAFLUSH, &server->serial_tio) < 0) {
     syslog(LOG_ERR, "Failed to reconfigure serial port!");
-    server_serial_start_response_timer(server);
+    server_serial_start_response_timer(server, 2);
     return false;
   }
 
@@ -359,10 +359,11 @@ void server_serial_read_response_timeout_cb(evutil_socket_t fd, short events, vo
  * Starts the response timeout timer.
  *
  * @param server Server context
+ * @param timeout Requested timeout in seconds
  */
-void server_serial_start_response_timer(struct server_context_t *server)
+void server_serial_start_response_timer(struct server_context_t *server, int timeout)
 {
-  struct timeval one_sec = { 1, 0 };
+  struct timeval one_sec = { timeout, 0 };
   if (!server->timeout_event)
     server->timeout_event = evtimer_new(server->base, server_serial_read_response_timeout_cb, server);
   evtimer_add(server->timeout_event, &one_sec);
@@ -378,7 +379,7 @@ void server_serial_start_response_timer(struct server_context_t *server)
  */
 void server_serial_send_command(struct server_context_t *server, const char *command, size_t length)
 {
-  server_serial_start_response_timer(server);
+  server_serial_start_response_timer(server, 1);
 
   if (!server->serial_bev && !server_serial_reset(server, false)) {
     syslog(LOG_ERR, "Failed to reset serial port before command, returning error!");
