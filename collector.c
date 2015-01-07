@@ -72,6 +72,10 @@ void collector_parse_response(struct collector_cfg_t *cfg,
                               gzFile log,
                               FILE *state)
 {
+  // Do not attempt to parse NULL responses
+  if (!response)
+    return;
+
   char *rsp = strdup(response);
   char *rsp_tok = rsp;
 

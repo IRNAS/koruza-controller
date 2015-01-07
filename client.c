@@ -173,6 +173,10 @@ bool client_send_device_command(int client_fd, const char *command, char **respo
     buffer_size = 0;
   }
 
+  // Prevent NULL responses from being propagated
+  if (result && *response == NULL)
+    result = false;
+
   return result;
 }
 
