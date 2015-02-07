@@ -70,7 +70,8 @@ void collector_parse_response(struct collector_cfg_t *cfg,
                               struct log_item_t **log_table,
                               const char *response,
                               gzFile log,
-                              FILE *state)
+                              FILE *state,
+                              FILE *last_state)
 {
   // Do not attempt to parse NULL responses
   if (!response)
@@ -81,6 +82,11 @@ void collector_parse_response(struct collector_cfg_t *cfg,
 
   ftruncate(fileno(state), 0);
   rewind(state);
+  if (last_state != NULL) {
+    ftruncate(fileno(last_state), 0);
+    rewind(last_state);
+    fprintf(last_state, "%d", time(NULL));
+  }
 
   // Each line in the form of <key>: <double> is a valid response
   for (;; rsp_tok = NULL) {
@@ -165,6 +171,9 @@ void collector_parse_response(struct collector_cfg_t *cfg,
       derived = item->sum / item->count;
 
     fprintf(state, "%s: %f\n", item->key, derived);
+    if (last_state != NULL) {
+      fprintf(last_state, " %f", item->last);
+    }
   }
 
   free(rsp);
@@ -182,6 +191,10 @@ void collector_parse_response(struct collector_cfg_t *cfg,
   gzprintf(log, "\n");
 
   fflush(state);
+  if (last_state != NULL) {
+    fprintf(last_state, "\n");
+    fflush(last_state);
+  }
   gzflush(log, Z_SYNC_FLUSH);
 }
 
@@ -237,6 +250,7 @@ bool start_collector(ucl_object_t *config, int log_option)
 
   const char *log_filename;
   const char *state_filename;
+  const char *last_state_filename = NULL;
 
   obj = ucl_object_find_key(cfg_collector, "log_file");
   if (!obj) {
@@ -253,6 +267,14 @@ bool start_collector(ucl_object_t *config, int log_option)
     return false;
   } else if (!ucl_object_tostring_safe(obj, &state_filename)) {
     fprintf(stderr, "ERROR: State file path must be a string!\n");
+    return false;
+  }
+
+  obj = ucl_object_find_key(cfg_collector, "last_state_file");
+  if (!obj) {
+    last_state_filename = NULL;
+  } else if (!ucl_object_tostring_safe(obj, &last_state_filename)) {
+    fprintf(stderr, "ERROR: Last state file path must be a string!\n");
     return false;
   }
 
@@ -291,6 +313,14 @@ bool start_collector(ucl_object_t *config, int log_option)
   if (!state_file) {
     fprintf(stderr, "ERROR: Unable to open state file.\n");
     return false;
+  }
+  FILE *last_state_file = NULL;
+  if (last_state_filename) {
+    last_state_file = fopen(last_state_filename, "w");
+    if (!last_state_file) {
+      fprintf(stderr, "ERROR: Unable to open state file.\n");
+      return false;
+    }
   }
 
   gzFile log_file_gz = gzdopen(fileno(log_file), "a");
@@ -371,7 +401,7 @@ bool start_collector(ucl_object_t *config, int log_option)
 
       log_file_size = stats.st_size;
 
-      collector_parse_response(&cfg, &log_table, response, log_file_gz, state_file);
+      collector_parse_response(&cfg, &log_table, response, log_file_gz, state_file, last_state_file);
       free(response);
     }
   }
