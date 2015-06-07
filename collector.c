@@ -207,26 +207,26 @@ void collector_parse_response(struct collector_cfg_t *cfg,
  */
 bool start_collector(ucl_object_t *config, int log_option)
 {
-  ucl_object_t *cfg_server = ucl_object_find_key(config, "server");
+  const ucl_object_t *cfg_server = ucl_object_find_key(config, "server");
   if (!cfg_server) {
     fprintf(stderr, "ERROR: Missing server configuration!\n");
     return false;
   }
 
-  ucl_object_t *cfg_collector = ucl_object_find_key(config, "collector");
+  const ucl_object_t *cfg_collector = ucl_object_find_key(config, "collector");
   if (!cfg_collector) {
     fprintf(stderr, "ERROR: Missing collector configuration!\n");
     return false;
   }
 
-  ucl_object_t *cfg_client = ucl_object_find_key(config, "client");
+  const ucl_object_t *cfg_client = ucl_object_find_key(config, "client");
   if (!cfg_client) {
     fprintf(stderr, "ERROR: Missing client configuration!\n");
     return false;
   }
 
   const char *status_command;
-  ucl_object_t *obj = ucl_object_find_key(cfg_client, "status_command");
+  const ucl_object_t *obj = ucl_object_find_key(cfg_client, "status_command");
   if (!obj) {
     fprintf(stderr, "ERROR: Missing 'status_command' in configuration file!\n");
     return false;
@@ -239,7 +239,7 @@ bool start_collector(ucl_object_t *config, int log_option)
   double poll_interval_sec;
   utimer_t poll_interval_msec;
 
-  ucl_object_t *interval = ucl_object_find_key(cfg_collector, "poll_interval");
+  const ucl_object_t *interval = ucl_object_find_key(cfg_collector, "poll_interval");
   if (!interval) {
     fprintf(stderr, "ERROR: Missing 'poll_interval' in configuration file!\n");
     return false;

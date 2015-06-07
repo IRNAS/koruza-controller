@@ -32,7 +32,7 @@
  * @param cfg_server Server configuration object
  * @return Socket file descriptor
  */
-int client_connect(ucl_object_t *cfg_server)
+int client_connect(const ucl_object_t *cfg_server)
 {
   // Install signal handlers
   signal(SIGPIPE, SIG_IGN);
@@ -42,7 +42,7 @@ int client_connect(ucl_object_t *cfg_server)
   memset(&address, 0, sizeof(address));
   address.sun_family = AF_UNIX;
 
-  ucl_object_t *obj = ucl_object_find_key(cfg_server, "socket");
+  const ucl_object_t *obj = ucl_object_find_key(cfg_server, "socket");
   const char *socket_path;
   if (!obj) {
     fprintf(stderr, "ERROR: Missing 'socket' in configuration file!\n");
@@ -172,10 +172,6 @@ bool client_send_device_command(int client_fd, const char *command, char **respo
     memset(buffer, 0, buffer_size);
     buffer_size = 0;
   }
-
-  // Prevent NULL responses from being propagated
-  if (result && *response == NULL)
-    result = false;
 
   return result;
 }

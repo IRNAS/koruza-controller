@@ -1,7 +1,7 @@
 /*
  * Simple KORUZA controller.
  *
- * Copyright (C) 2014 by Jernej Kos <kostko@irnas.eu>
+ * Copyright (C) 2015 by Jernej Kos <kostko@irnas.eu>
  *
  * This program is free software: you can redistribute it and/or modify it
  * under the terms of the GNU Affero General Public License as published by the
@@ -28,6 +28,7 @@
 #include "server.h"
 #include "controller.h"
 #include "collector.h"
+#include "callibrator.h"
 
 /**
  * Prints help text.
@@ -41,6 +42,7 @@ void show_help(const char *app)
     "       -s         request status and exit\n"
     "       -d         start server daemon\n"
     "       -l         start the data collector\n"
+    "       -r         start the callibrator\n"
     "       -f         run in foreground\n"
   );
 }
@@ -54,11 +56,12 @@ int main(int argc, char **argv)
   char *config_file = NULL;
   bool server = false;
   bool collector = false;
+  bool callibrator = false;
   bool status_only = false;
   int log_option = 0;
 
   char c;
-  while ((c = getopt(argc, argv, "hc:sdfl")) != EOF) {
+  while ((c = getopt(argc, argv, "hc:sdflr")) != EOF) {
     switch (c) {
       case 'h': {
         show_help(argv[0]);
@@ -68,6 +71,7 @@ int main(int argc, char **argv)
       case 's': status_only = true; break;
       case 'd': server = true; break;
       case 'l': collector = true; break;
+      case 'r': callibrator = true; break;
       case 'f': log_option |= LOG_PERROR; break;
       default: {
         fprintf(stderr, "ERROR: Invalid option %c!\n", c);
@@ -109,6 +113,8 @@ int main(int argc, char **argv)
     start_server(obj, log_option);
   } else if (collector) {
     start_collector(config, log_option);
+  } else if (callibrator) {
+    start_callibrator(config, log_option);
   } else {
     start_controller(config, status_only);
   }

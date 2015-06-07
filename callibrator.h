@@ -1,7 +1,7 @@
 /*
  * Simple KORUZA controller.
  *
- * Copyright (C) 2014 by Jernej Kos <kostko@irnas.eu>
+ * Copyright (C) 2015 by Jernej Kos <kostko@irnas.eu>
  *
  * This program is free software: you can redistribute it and/or modify it
  * under the terms of the GNU Affero General Public License as published by the
@@ -16,13 +16,11 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-#ifndef KORUZA_CONTROLLER_CLIENT_H
-#define KORUZA_CONTROLLER_CLIENT_H
+#ifndef KORUZA_CONTROLLER_CALLIBRATOR_H
+#define KORUZA_CONTROLLER_CALLIBRATOR_H
 
 #include <ucl.h>
 
-int client_connect(const ucl_object_t *cfg_server);
-bool client_send_device_command(int client_fd, const char *command, char **response);
-bool client_request_device_state(int client_fd, const char *command, bool format);
+bool start_callibrator(ucl_object_t *config, int log_option);
 
 #endif

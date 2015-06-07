@@ -555,7 +555,7 @@ bool start_server(ucl_object_t *config, int log_option)
   }
 
   // Configure hooks
-  ucl_object_t *hooks = ucl_object_find_key(config, "hooks");
+  const ucl_object_t *hooks = ucl_object_find_key(config, "hooks");
   if (obj) {
     // Device reset hook
     obj = ucl_object_find_key(hooks, "reset");

@@ -79,13 +79,13 @@ bool start_manual_controller(ucl_object_t *config, const char *status_command, i
   double status_refresh_interval_sec;
   utimer_t status_refresh_interval_msec;
 
-  ucl_object_t *commands = ucl_object_find_key(config, "commands");
+  const ucl_object_t *commands = ucl_object_find_key(config, "commands");
   if (!commands) {
     fprintf(stderr, "ERROR: Missing 'commands' in configuration file!\n");
     return false;
   }
 
-  ucl_object_t *interval = ucl_object_find_key(config, "status_interval");
+  const ucl_object_t *interval = ucl_object_find_key(config, "status_interval");
   if (!interval) {
     fprintf(stderr, "ERROR: Missing 'status_interval' in configuration file!\n");
     return false;
@@ -179,19 +179,19 @@ bool start_manual_controller(ucl_object_t *config, const char *status_command, i
  */
 bool start_controller(ucl_object_t *config, bool status_only)
 {
-  ucl_object_t *cfg_server = ucl_object_find_key(config, "server");
+  const ucl_object_t *cfg_server = ucl_object_find_key(config, "server");
   if (!cfg_server) {
     fprintf(stderr, "ERROR: Missing server configuration!\n");
     return false;
   }
 
-  ucl_object_t *cfg_controller = ucl_object_find_key(config, "controller");
+  const ucl_object_t *cfg_controller = ucl_object_find_key(config, "controller");
   if (!cfg_controller) {
     fprintf(stderr, "ERROR: Missing controller configuration!\n");
     return false;
   }
 
-  ucl_object_t *cfg_client = ucl_object_find_key(config, "client");
+  const ucl_object_t *cfg_client = ucl_object_find_key(config, "client");
   if (!cfg_client) {
     fprintf(stderr, "ERROR: Missing client configuration!\n");
     return false;
