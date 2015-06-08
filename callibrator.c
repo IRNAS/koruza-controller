@@ -140,23 +140,9 @@ bool start_callibrator(ucl_object_t *config, int log_option)
 
   interval_msec = (long) (interval_sec * 1000);
 
-  const char *callibration_command;
-  const ucl_object_t *cfg_command = ucl_object_find_key(cfg_callibrator, "command");
-  if (!cfg_command) {
-    fprintf(stderr, "ERROR: Missing 'command' in configuration file!\n");
-    return false;
-  } else if (!ucl_object_tostring_safe(cfg_command, &callibration_command)) {
-    fprintf(stderr, "ERROR: Callibration command must be a string!\n");
-    return false;
-  }
-
-  int64_t callibration_token_index = 0;
-  const ucl_object_t *cfg_token_index = ucl_object_find_key(cfg_callibrator, "token_index");
-  if (!cfg_token_index) {
-    fprintf(stderr, "ERROR: Missing 'token_index' in configuration file!\n");
-    return false;
-  } else if (!ucl_object_toint_safe(cfg_token_index, &callibration_token_index)) {
-    fprintf(stderr, "ERROR: Callibration token index must be an integer!\n");
+  const ucl_object_t *cfg_tokens = ucl_object_find_key(cfg_callibrator, "tokens");
+  if (!cfg_tokens) {
+    fprintf(stderr, "ERROR: Missing 'tokens' in configuration file!\n");
     return false;
   }
 
@@ -200,32 +186,37 @@ bool start_callibrator(ucl_object_t *config, int log_option)
         if (token == NULL)
           break;
 
-        if (index == callibration_token_index)
-          break;
-      }
+        // Check if this token is configured to execute any command.
+        char key[64] = {0,};
+        snprintf(key, sizeof(key), "%d", index);
 
-      if (!token) {
-        syslog(LOG_ERR, "Failed to find callibration token under index %d.", callibration_token_index);
-        continue;
-      }
-
-      // Execute callibration command locally.
-      char *response;
-      char command[256] = {0,};
-      snprintf(command, sizeof(command), callibration_command, token);
-      if (!client_send_device_command(client_fd, command, &response)) {
-        syslog(LOG_WARNING, "Failed to communicate with the control daeamon!");
-
-        if (++cmd_failures > 5) {
-          syslog(LOG_ERR, "Multiple failures while recallibrating, reconnecting...");
-          close(client_fd);
-          client_fd = client_connect(cfg_server);
-          cmd_failures = 0;
+        const char *callibration_command;
+        const ucl_object_t *cfg_callibration_command = ucl_object_find_key(cfg_tokens, key);
+        if (!cfg_callibration_command) {
+          continue;
+        } else if (!ucl_object_tostring_safe(cfg_callibration_command, &callibration_command)) {
+          syslog(LOG_ERR, "Callibration command for token %d must be a string!", index);
+          continue;
         }
-        continue;
-      }
 
-      free(response);
+        // Execute callibration command locally.
+        char *response;
+        char command[256] = {0,};
+        snprintf(command, sizeof(command), callibration_command, token);
+        if (!client_send_device_command(client_fd, command, &response)) {
+          syslog(LOG_WARNING, "Failed to communicate with the control daeamon!");
+
+          if (++cmd_failures > 5) {
+            syslog(LOG_ERR, "Multiple failures while recallibrating, reconnecting...");
+            close(client_fd);
+            client_fd = client_connect(cfg_server);
+            cmd_failures = 0;
+          }
+          continue;
+        }
+
+        free(response);
+      }
     }
   }
 }
