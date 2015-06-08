@@ -195,7 +195,7 @@ bool start_callibrator(ucl_object_t *config, int log_option)
       char *token = NULL;
       char *tmp;
       int index;
-      for (index = 1, tmp = value; index++; tmp = NULL) {
+      for (index = 1, tmp = value; ; tmp = NULL, index++) {
         token = strtok(tmp, " ");
         if (token == NULL)
           break;
