@@ -199,6 +199,10 @@ bool start_callibrator(ucl_object_t *config, int log_option)
           continue;
         }
 
+        // If there is a newline at the end of the token, strip it.
+        if (token[strlen(token) - 1] == '\n')
+          token[strlen(token) - 1] = 0;
+
         // Execute callibration command locally.
         char *response;
         char command[256] = {0,};
